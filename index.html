@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HRV Measurement App</title>
+  <style>
+    body { font-family: sans-serif; text-align: center; margin: 20px; }
+    #video { display: none; }
+    #canvas { display: none; }
+    #result { margin-top: 20px; font-size: 1.2em; }
+  </style>
+</head>
+<body>
+  <h1>HRV Measurement App</h1>
+  <p>Place your finger on the camera lens and press Start.</p>
+  <button id="startBtn">Start Measurement</button>
+  <div id="result"></div>
+  <video id="video"></video>
+  <canvas id="canvas"></canvas>
+
+  <script>
+    const startBtn = document.getElementById('startBtn');
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const resultDiv = document.getElementById('result');
+
+    let stream;
+    let beatIntervals = [];
+    let lastBeatTime = null;
+    let processing = false;
+
+    startBtn.addEventListener('click', async () => {
+      try {
+        // Request camera access (using environment facing if available)
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        video.srcObject = stream;
+        await video.play();
+        processing = true;
+        measure();
+      } catch (err) {
+        resultDiv.innerText = 'Error accessing camera: ' + err.message;
+      }
+    });
+
+    function measure() {
+      const context = canvas.getContext('2d');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+
+      function processFrame() {
+        if (!processing) return;
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const frame = context.getImageData(0, 0, canvas.width, canvas.height);
+        const data = frame.data;
+        let sum = 0;
+        // Use the red channel for a rough PPG signal
+        for (let i = 0; i < data.length; i += 4) {
+          sum += data[i];
+        }
+        const avg = sum / (data.length / 4);
+
+        const currentTime = performance.now();
+
+        // A very simplistic threshold-based peak detection.
+        // In practice, you would use a more robust method with proper filtering.
+        if (avg > 150 && (lastBeatTime === null || (currentTime - lastBeatTime > 300))) {
+          if (lastBeatTime) {
+            beatIntervals.push(currentTime - lastBeatTime);
+          }
+          lastBeatTime = currentTime;
+          console.log("Beat detected at", currentTime);
+        }
+
+        // Update HRV reading periodically (e.g., every 10 seconds)
+        if (beatIntervals.length > 10) {
+          const hrv = computeHRV();
+          resultDiv.innerText = "Estimated HRV (RMSSD): " + Math.round(hrv) + " ms";
+        }
+        requestAnimationFrame(processFrame);
+      }
+      processFrame();
+    }
+
+    // Compute HRV using RMSSD (Root Mean Square of Successive Differences)
+    function computeHRV() {
+      if (beatIntervals.length < 2) return 0;
+      let sumSqDiff = 0;
+      for (let i = 1; i < beatIntervals.length; i++) {
+        const diff = beatIntervals[i] - beatIntervals[i - 1];
+        sumSqDiff += diff * diff;
+      }
+      return Math.sqrt(sumSqDiff / (beatIntervals.length - 1));
+    }
+  </script>
+</body>
+</html>
